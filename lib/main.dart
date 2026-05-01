@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'screens/home_screen.dart';
 
-void main() {
+Future<void> main() async {
+  // Must come before any plugin/platform-channel call.
+  // Without this, flutter_blue_plus can race with the Flutter engine
+  // during startup on iOS and cause an intermittent white-screen crash.
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Must be called before any other FlutterBluePlus method (per package docs).
+  // showPowerAlert: false stops iOS showing a system "Bluetooth unavailable"
+  // dialog on every cold launch before the user has tapped Connect.
+  await FlutterBluePlus.setOptions(showPowerAlert: false);
+
   runApp(const MotorControllerApp());
 }
 
