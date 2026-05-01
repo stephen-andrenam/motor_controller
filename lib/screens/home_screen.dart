@@ -15,66 +15,66 @@ class HomeScreen extends StatelessWidget {
           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: 1.2),
         ),
       ),
-      body: ListenableBuilder(
-        listenable: BleManager.instance,
-        builder: (context, _) {
-          final ble = BleManager.instance;
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ConnectionCard(ble: ble),
-                const SizedBox(height: 16),
-                _ConnectButton(ble: ble),
-                const SizedBox(height: 48),
-                Text(
-                  'SELECT MODE',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    letterSpacing: 2, fontSize: 12, fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                _ModeCard(
-                  title: 'Constant Throttle',
-                  description:
-                      'Set a fixed throttle percentage. The motor holds\n'
-                      'this speed after the command is sent.',
-                  icon: Icons.speed,
-                  color: const Color(0xFF00B4D8),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const ConstantModeScreen()),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _ModeCard(
-                  title: 'Sweep Mode',
-                  description:
-                      'Define a throttle sweep profile. The ESP32 will\n'
-                      'execute the sweep autonomously once submerged.',
-                  icon: Icons.show_chart,
-                  color: const Color(0xFF48CAE4),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SweepModeScreen()),
-                  ),
-                ),
-                const Spacer(),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    'Commands are sent once — the device operates\n'
-                    'independently after submerging.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
-                  ),
-                ),
-              ],
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ListenableBuilder(
+              listenable: BleManager.instance,
+              builder: (context, _) => _ConnectionCard(ble: BleManager.instance),
             ),
-          );
-        },
+            const SizedBox(height: 16),
+            ListenableBuilder(
+              listenable: BleManager.instance,
+              builder: (context, _) => _ConnectButton(ble: BleManager.instance),
+            ),
+            const SizedBox(height: 48),
+            Text(
+              'SELECT MODE',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                letterSpacing: 2, fontSize: 12, fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 20),
+            _ModeCard(
+              title: 'Constant Throttle',
+              description:
+                  'Set a fixed throttle percentage. The motor holds\n'
+                  'this speed after the command is sent.',
+              icon: Icons.speed,
+              color: const Color(0xFF00B4D8),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ConstantModeScreen()),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _ModeCard(
+              title: 'Sweep Mode',
+              description:
+                  'Define a throttle sweep profile. The ESP32 will\n'
+                  'execute the sweep autonomously once submerged.',
+              icon: Icons.show_chart,
+              color: const Color(0xFF48CAE4),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SweepModeScreen()),
+              ),
+            ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Commands are sent once — the device operates\n'
+                'independently after submerging.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -149,10 +149,24 @@ class _PulseDotState extends State<_PulseDot>
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true);
+    );
     _scale = Tween(begin: 0.8, end: 1.3).animate(
       CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
     );
+    if (widget.animate) _ctrl.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_PulseDot old) {
+    super.didUpdateWidget(old);
+    if (widget.animate == old.animate) return;
+    if (widget.animate) {
+      _ctrl.repeat(reverse: true);
+    } else {
+      _ctrl
+        ..stop()
+        ..value = 0;
+    }
   }
 
   @override
