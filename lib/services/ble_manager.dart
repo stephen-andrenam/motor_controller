@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 // ── UUIDs must match the Arduino sketch exactly ───────────────
@@ -10,18 +10,20 @@ const _kDeviceName  = 'ESP32 Motor';
 
 enum BleStatus { idle, scanning, connecting, connected, error }
 
-/// Singleton BLE manager.  Widgets listen via [addListener] /
-/// [ListenableBuilder] — no extra state-management package needed.
-class BleManager extends ChangeNotifier {
+/// Singleton BLE manager.
+/// Registered as a [WidgetsBindingObserver] in main() so it can
+/// disconnect cleanly when the app is backgrounded, preventing iOS
+/// CoreBluetooth from queuing stale events that crash the next launch.
+class BleManager extends ChangeNotifier with WidgetsBindingObserver {
   BleManager._();
   static final BleManager instance = BleManager._();
 
-  // ── Public state ────────────────────────────────────────────
-  BleStatus get status         => _status;
-  bool      get isConnected    => _status == BleStatus.connected;
-  String    get statusMessage  => _statusMessage;
+  // ── Public state ─────────────────────────────────────────────
+  BleStatus get status        => _status;
+  bool      get isConnected   => _status == BleStatus.connected;
+  String    get statusMessage => _statusMessage;
 
-  // ── Private state ───────────────────────────────────────────
+  // ── Private state ────────────────────────────────────────────
   BleStatus  _status        = BleStatus.idle;
   String     _statusMessage = 'Not connected';
 
@@ -29,7 +31,20 @@ class BleManager extends ChangeNotifier {
   BluetoothCharacteristic? _char;
   StreamSubscription?      _connStateSub;
 
-  // ── Connect ─────────────────────────────────────────────────
+  // ── App lifecycle ────────────────────────────────────────────
+  // When iOS backgrounds and then kills the app while a BLE connection
+  // is open, CoreBluetooth queues a disconnect event. On the next cold
+  // launch flutter_blue_plus's native layer tries to deliver it before
+  // Dart is ready → crash. Disconnecting on pause eliminates that queued
+  // event entirely. The ESP32 will continue its last command regardless.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && _device != null) {
+      disconnect();
+    }
+  }
+
+  // ── Connect ──────────────────────────────────────────────────
   Future<void> connect() async {
     if (_status == BleStatus.scanning || _status == BleStatus.connecting) return;
 
@@ -54,7 +69,6 @@ class BleManager extends ChangeNotifier {
     });
 
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
-    // Wait until the scan has fully stopped (timeout or we called stopScan)
     await FlutterBluePlus.isScanning.where((v) => !v).first;
     await scanSub.cancel();
 
@@ -66,21 +80,20 @@ class BleManager extends ChangeNotifier {
     _set(BleStatus.connecting, 'Connecting…');
     _device = found;
 
-    // Track connection-state changes (handles unexpected disconnect)
-    _connStateSub?.cancel();
-    _connStateSub = found!.connectionState.listen((state) {
-      if (state == BluetoothConnectionState.disconnected) {
-        _char = null;
-        _set(BleStatus.idle, 'Disconnected');
-      }
-    });
-
+    // ── Connect first, subscribe to state changes after ───────
+    // flutter_blue_plus re-emits the last known connection state the
+    // moment you subscribe. If iOS remembers the device as disconnected
+    // from the previous session and we subscribe before connect(), that
+    // replay fires our listener immediately, resetting status to idle
+    // in the middle of the connect sequence. Subscribing after connect()
+    // succeeds avoids that race entirely.
     try {
       await found!.connect(
         license: License.free,
         timeout: const Duration(seconds: 10),
       );
     } catch (e) {
+      _device = null;
       _set(BleStatus.error, 'Connection failed: $e');
       return;
     }
@@ -90,6 +103,8 @@ class BleManager extends ChangeNotifier {
     try {
       services = await found!.discoverServices();
     } catch (e) {
+      await found!.disconnect();
+      _device = null;
       _set(BleStatus.error, 'Service discovery failed: $e');
       return;
     }
@@ -106,31 +121,47 @@ class BleManager extends ChangeNotifier {
     }
 
     if (_char == null) {
-      _set(BleStatus.error, 'Motor characteristic not found on device');
       await found!.disconnect();
+      _device = null;
+      _set(BleStatus.error, 'Motor characteristic not found on device');
       return;
     }
 
     _set(BleStatus.connected, 'Connected to $_kDeviceName');
+
+    // Now safe to watch for unexpected disconnects — we're fully set up
+    // so no stale replay can interfere.
+    _connStateSub?.cancel();
+    _connStateSub = _device!.connectionState.listen((state) {
+      if (state == BluetoothConnectionState.disconnected) {
+        _char  = null;
+        _device = null;
+        _connStateSub?.cancel();
+        _connStateSub = null;
+        _set(BleStatus.idle, 'Disconnected');
+      }
+    });
   }
 
   // ── Disconnect ───────────────────────────────────────────────
   Future<void> disconnect() async {
-    await _device?.disconnect();
-    _char = null;
     _connStateSub?.cancel();
+    _connStateSub = null;
+    _char = null;
+    try {
+      await _device?.disconnect();
+    } catch (_) {
+      // Ignore errors during disconnect — we're cleaning up regardless.
+    }
+    _device = null;
     _set(BleStatus.idle, 'Disconnected');
   }
 
   // ── Send a command string ────────────────────────────────────
-  /// Returns true on success, false if not connected or write failed.
   Future<bool> sendCommand(String command) async {
     if (_char == null || !isConnected) return false;
     try {
-      await _char!.write(
-        utf8.encode(command),
-        withoutResponse: false,
-      );
+      await _char!.write(utf8.encode(command), withoutResponse: false);
       return true;
     } catch (e) {
       _set(BleStatus.error, 'Send failed: $e');

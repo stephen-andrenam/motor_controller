@@ -1,19 +1,34 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'screens/home_screen.dart';
+import 'services/ble_manager.dart';
 
 Future<void> main() async {
-  // Must come before any plugin/platform-channel call.
-  // Without this, flutter_blue_plus can race with the Flutter engine
-  // during startup on iOS and cause an intermittent white-screen crash.
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Must be called before any other FlutterBluePlus method (per package docs).
-  // showPowerAlert: false stops iOS showing a system "Bluetooth unavailable"
-  // dialog on every cold launch before the user has tapped Connect.
+  // Must be called before any other FlutterBluePlus method.
+  // showPowerAlert: false stops iOS showing a "Bluetooth unavailable"
+  // system dialog on every cold launch before the user taps Connect.
   await FlutterBluePlus.setOptions(showPowerAlert: false);
 
-  runApp(const MotorControllerApp());
+  // Register BleManager for app lifecycle events so it can disconnect
+  // cleanly when the app is backgrounded — prevents iOS CoreBluetooth
+  // from queuing stale events that crash the next cold launch.
+  WidgetsBinding.instance.addObserver(BleManager.instance);
+
+  // Route Flutter framework errors to the console so they appear in
+  // Xcode's output even in profile/release builds.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('FlutterError: ${details.exceptionAsString()}');
+  };
+
+  // Catch all other uncaught async Dart errors.
+  runZonedGuarded(
+    () => runApp(const MotorControllerApp()),
+    (error, stack) => debugPrint('Uncaught Dart error: $error\n$stack'),
+  );
 }
 
 class MotorControllerApp extends StatelessWidget {
