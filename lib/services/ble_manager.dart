@@ -48,8 +48,15 @@ class BleManager extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> connect() async {
     if (_status == BleStatus.scanning || _status == BleStatus.connecting) return;
 
-    // Check adapter
-    final adapterState = await FlutterBluePlus.adapterState.first;
+    // Wait for a settled adapter state — the first emission can be
+    // BluetoothAdapterState.unknown while CoreBluetooth is still initializing.
+    final adapterState = await FlutterBluePlus.adapterState
+        .where((s) => s != BluetoothAdapterState.unknown)
+        .first
+        .timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => BluetoothAdapterState.unknown,
+        );
     if (adapterState != BluetoothAdapterState.on) {
       _set(BleStatus.error, 'Bluetooth is off — enable it and try again');
       return;
