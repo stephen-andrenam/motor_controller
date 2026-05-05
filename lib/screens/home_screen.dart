@@ -64,6 +64,11 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
             const Spacer(),
+            ListenableBuilder(
+              listenable: BleManager.instance,
+              builder: (context, _) => _CalibrateButton(ble: BleManager.instance),
+            ),
+            const SizedBox(height: 16),
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
@@ -230,6 +235,105 @@ class _ConnectButton extends StatelessWidget {
       label: Text(
         busy ? 'Searching…' : 'Connect to ESP32',
         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+// ── Calibrate ESC button ──────────────────────────────────────
+
+class _CalibrateButton extends StatefulWidget {
+  const _CalibrateButton({required this.ble});
+  final BleManager ble;
+
+  @override
+  State<_CalibrateButton> createState() => _CalibrateButtonState();
+}
+
+class _CalibrateButtonState extends State<_CalibrateButton> {
+  bool _sent = false;
+
+  Future<void> _calibrate() async {
+    if (!widget.ble.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Connect to the ESP32 first')),
+      );
+      return;
+    }
+
+    // Confirm — calibration requires the ESC to be unpowered first
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Calibrate ESC'),
+        content: const Text(
+          'ESC calibration procedure:\n\n'
+          '1. Disconnect power from the ESC (motor off).\n'
+          '2. Tap Calibrate — the ESP32 will hold max throttle.\n'
+          '3. Power the ESC back on.\n'
+          '4. Wait for the ESC to beep (≈ 3 s), then it will\n'
+          '   drop to min throttle automatically.\n'
+          '5. ESC beeps again — calibration done.\n\n'
+          'Only needed once, or after changing the pulse range.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Calibrate'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    final success = await widget.ble.sendCommand('CAL');
+    if (!mounted) return;
+
+    if (success) {
+      setState(() => _sent = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Calibration started — power the ESC on now'),
+          duration: Duration(seconds: 5),
+        ),
+      );
+      // Reset the "sent" indicator after calibration window (3 s + buffer)
+      Future.delayed(const Duration(seconds: 5), () {
+        if (mounted) setState(() => _sent = false);
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send calibration command')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: _calibrate,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: const Color(0xFFFFC107),
+        side: BorderSide(
+          color: _sent
+              ? const Color(0xFFFFC107)
+              : const Color(0xFFFFC107).withValues(alpha: 0.4),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      ),
+      icon: Icon(
+        _sent ? Icons.check_circle_outline : Icons.tune,
+        size: 18,
+      ),
+      label: Text(
+        _sent ? 'Calibrating… power ESC on now' : 'Calibrate ESC',
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
     );
   }
